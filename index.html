@@ -168,6 +168,27 @@
         .video-scroll-area {
             height: 1000px; /* This will be adjusted based on video duration */
         }
+        
+        /* iOS-specific fixes */
+        .ios-fallback {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 10px;
+            margin: 2rem;
+        }
+        
+        .ios-fallback button {
+            background: white;
+            color: black;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 30px;
+            font-size: 1.1rem;
+            margin-top: 1rem;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -175,15 +196,20 @@
     <div id="loading-screen">
         <div class="loader"></div>
         <p>Loading video content...</p>
+        <div class="ios-fallback" id="ios-fallback">
+            <h3>Video Playback Issue</h3>
+            <p>iOS Safari requires user interaction to play videos.</p>
+            <button id="ios-play-btn">Tap to Play Videos</button>
+        </div>
     </div>
 
     <!-- Video Container (background) -->
     <div id="video-container">
-        <video id="intro-video" muted playsinline>
+        <video id="intro-video" muted playsinline webkit-playsinline>
             <source src="./IntroVid.mp4" type="video/mp4">
             Your browser does not support the video tag.
         </video>
-        <video id="scroll-video" muted playsinline preload="auto">
+        <video id="scroll-video" muted playsinline webkit-playsinline preload="auto">
             <source src="./ScrollVid.mp4" type="video/mp4">
             Your browser does not support the video tag.
         </video>
@@ -192,6 +218,7 @@
 
     <!-- UI Overlay -->
     <div id="ui-overlay">
+        <!-- TODO: Add UI elements -->
     </div>
 
     <!-- Progress Bar -->
@@ -213,22 +240,24 @@
             const scrollVideo = document.getElementById('scroll-video');
             const scrollCanvas = document.getElementById('scroll-canvas');
             const canvasContext = scrollCanvas.getContext('2d');
-            const replayBtn = document.getElementById('replay-btn');
             const progressBar = document.getElementById('progress-bar');
             const videoScrollArea = document.getElementById('video-scroll-area');
+            const iosFallback = document.getElementById('ios-fallback');
+            const iosPlayBtn = document.getElementById('ios-play-btn');
             
             // State variables
             let isIntroPlaying = true;
             let isScrollVideoReady = false;
             let scrollVideoDuration = 0;
             let videoScrollHeight = 0;
+            let isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
             
             // Debug function
             function debug(message) {
                 console.log(message);
             }
             
-            // Set canvas size
+            // Set canvas size 
             function setCanvasSize() {
                 scrollCanvas.width = window.innerWidth;
                 scrollCanvas.height = window.innerHeight;
@@ -261,15 +290,45 @@
             handleVideoError(introVideo, 'intro video');
             handleVideoError(scrollVideo, 'scroll video');
             
+            // iOS-specific video handling
+            if (isIOS) {
+                debug('iOS device detected, applying specific fixes');
+                
+                // Show iOS fallback message
+                iosFallback.style.display = 'block';
+                
+                // iOS requires direct user interaction for video playback
+                iosPlayBtn.addEventListener('click', function() {
+                    debug('iOS play button clicked');
+                    iosFallback.style.display = 'none';
+                    
+                    // Hide loading screen and play intro video
+                    loadingScreen.classList.add('hidden');
+                    
+                    // Try to play videos
+                    const playPromise = introVideo.play();
+                    if (playPromise !== undefined) {
+                        playPromise.then(() => {
+                            debug('iOS intro video started playing');
+                        }).catch(error => {
+                            debug(`iOS intro video play failed: ${error}`);
+                            // If still fails, try a different approach
+                            introVideo.muted = true;
+                            introVideo.play().catch(e => {
+                                debug(`iOS intro video second attempt failed: ${e}`);
+                            });
+                        });
+                    }
+                });
+            }
+            
             // Load videos
             introVideo.addEventListener('loadeddata', function() {
                 debug('Intro video loaded successfully');
-                console.log('Intro video loaded');
                 
                 // Also listen for canplay event for scroll video
                 scrollVideo.addEventListener('loadeddata', function() {
                     debug('Scroll video loadeddata');
-                    console.log('Scroll video loaded');
                 });
                 
                 scrollVideo.addEventListener('canplay', function() {
@@ -279,7 +338,6 @@
                 // Load scroll video metadata to get duration
                 scrollVideo.addEventListener('loadedmetadata', function() {
                     debug('Scroll video metadata loaded');
-                    console.log('Scroll video metadata loaded');
                     scrollVideoDuration = scrollVideo.duration;
                     isScrollVideoReady = true;
                     
@@ -290,7 +348,6 @@
                     videoScrollArea.style.height = videoScrollHeight + 'px';
                     
                     debug(`Video duration: ${scrollVideoDuration}s, Scroll height: ${videoScrollHeight}px`);
-                    console.log('Video duration:', scrollVideoDuration, 'Scroll height:', videoScrollHeight);
                     
                     // Set up the seeked event handler
                     scrollVideo.addEventListener('seeked', function() {
@@ -309,7 +366,6 @@
                 setTimeout(function() {
                     if (!isScrollVideoReady) {
                         debug('Scroll video loading timeout, checking current state');
-                        console.warn('Scroll video loading timeout, using available data');
                         
                         // Check if we have any duration info
                         if (scrollVideo.duration && scrollVideo.duration !== Infinity) {
@@ -335,18 +391,25 @@
             
             function startExperience() {
                 debug('Starting experience');
-                // Hide loading screen and play intro video
-                loadingScreen.classList.add('hidden');
-                introVideo.play().catch(e => {
-                    debug(`Intro video play failed: ${e.message}`);
-                    // Auto-play might be blocked, user interaction required
-                    loadingScreen.querySelector('p').textContent = 'Click to start experience';
-                    loadingScreen.style.cursor = 'pointer';
-                    loadingScreen.onclick = function() {
-                        introVideo.play();
-                        loadingScreen.classList.add('hidden');
-                    };
-                });
+                
+                // For iOS, we'll wait for the user to click the play button
+                if (!isIOS) {
+                    // Hide loading screen and play intro video
+                    loadingScreen.classList.add('hidden');
+                    introVideo.play().catch(e => {
+                        debug(`Intro video play failed: ${e.message}`);
+                        // Auto-play might be blocked, user interaction required
+                        loadingScreen.querySelector('p').textContent = 'Click to start experience';
+                        loadingScreen.style.cursor = 'pointer';
+                        loadingScreen.onclick = function() {
+                            introVideo.play();
+                            loadingScreen.classList.add('hidden');
+                        };
+                    });
+                } else {
+                    // For iOS, just update the loading message
+                    loadingScreen.querySelector('p').textContent = 'Ready! Tap the button above to start';
+                }
                 
                 // When intro video ends, switch to scroll-controlled video
                 introVideo.addEventListener('ended', function() {
