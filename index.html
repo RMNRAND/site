@@ -207,7 +207,7 @@
         #scroll-content {
             position: relative;
             z-index: 5;
-            height: 500vh; /* Make page very tall to enable scrolling */
+            height: 200vh; /* Fixed height - we'll adjust this programmatically */
             pointer-events: none;
         }
     </style>
@@ -216,17 +216,17 @@
     <!-- Loading Screen -->
     <div id="loading-screen">
         <div class="loader"></div>
-        <p>Loading Greatness...</p>
+        <p>Loading video content...</p>
     </div>
 
     <!-- Video Container (background) -->
     <div id="video-container">
         <video id="intro-video" muted playsinline>
-            <source src="IntroVid.mp4" type="video/mp4">
+            <source src="./IntroVid.mp4" type="video/mp4">
             Your browser does not support the video tag.
         </video>
         <video id="scroll-video" muted playsinline preload="metadata">
-            <source src="ScrollVid.mp4" type="video/mp4">
+            <source src="./ScrollVid.mp4" type="video/mp4">
             Your browser does not support the video tag.
         </video>
         <canvas id="scroll-canvas"></canvas>
@@ -234,25 +234,10 @@
 
     <!-- UI Overlay -->
     <div id="ui-overlay">
-        <header class="ui-section">
-            <h1>Immersive Experience</h1>
-            <p>Scroll to explore the interactive video</p>
-        </header>
-
-        <div class="content ui-section">
-            <h2>Discover New Perspectives</h2>
-            <p>This innovative interface allows you to control video playback through scrolling. No traditional controls, just your natural browsing behavior.</p>
-            <p>As you scroll, you'll navigate through frames of the video, creating a unique interactive experience.</p>
-        </div>
 
         <footer class="ui-section">
             <div class="controls">
                 <button id="replay-btn">Replay Intro</button>
-                <button id="mute-btn">Toggle Sound</button>
-            </div>
-            <div class="scroll-indicator">
-                Scroll to continue
-                <span class="icon">↓</span>
             </div>
         </footer>
     </div>
@@ -283,7 +268,7 @@
             let isScrollVideoReady = false;
             let scrollVideoDuration = 0;
             let isMuted = true;
-            let scrollHeight = 0;
+            let maxScrollHeight = 0;
             
             // Set canvas size
             function setCanvasSize() {
@@ -304,9 +289,11 @@
                     scrollVideoDuration = scrollVideo.duration;
                     isScrollVideoReady = true;
                     
-                    // Calculate scroll height based on video duration (1 second = 100vh)
-                    scrollHeight = scrollVideoDuration * 100;
-                    scrollContent.style.height = scrollHeight + 'vh';
+                    // Calculate scroll height based on video duration
+                    // We want the full video to play over the height of 1 viewport
+                    // So we make the scrollable area equal to the viewport height
+                    maxScrollHeight = window.innerHeight;
+                    scrollContent.style.height = (maxScrollHeight * 2) + 'px'; // 2x viewport height for comfortable scrolling
                     
                     startExperience();
                 });
@@ -316,8 +303,8 @@
                     if (!isScrollVideoReady) {
                         console.warn('Scroll video loading timeout, using default values');
                         scrollVideoDuration = 10; // Default duration
-                        scrollHeight = 1000; // Default scroll height
-                        scrollContent.style.height = scrollHeight + 'vh';
+                        maxScrollHeight = window.innerHeight;
+                        scrollContent.style.height = (maxScrollHeight * 2) + 'px';
                         isScrollVideoReady = true;
                         startExperience();
                     }
@@ -347,40 +334,50 @@
             function updateScrollVideoFrame(scrollProgress) {
                 if (!isScrollVideoReady) return;
                 
+                // Clamp scroll progress between 0 and 1
+                const clampedProgress = Math.min(Math.max(scrollProgress, 0), 1);
+                
                 // Calculate video time based on scroll progress
-                const videoTime = scrollProgress * scrollVideoDuration;
+                const videoTime = clampedProgress * scrollVideoDuration;
                 
                 // Set video time and draw frame to canvas
-                scrollVideo.currentTime = videoTime;
-                
-                // Use seeked event to ensure we have the correct frame
-                scrollVideo.onseeked = function() {
-                    canvasContext.drawImage(scrollVideo, 0, 0, scrollCanvas.width, scrollCanvas.height);
-                };
+                if (videoTime <= scrollVideoDuration) {
+                    scrollVideo.currentTime = videoTime;
+                    
+                    // Use seeked event to ensure we have the correct frame
+                    scrollVideo.onseeked = function() {
+                        canvasContext.drawImage(scrollVideo, 0, 0, scrollCanvas.width, scrollCanvas.height);
+                    };
+                }
                 
                 // Update progress bar
-                progressBar.style.width = (scrollProgress * 100) + '%';
+                progressBar.style.width = (clampedProgress * 100) + '%';
             }
             
             // Scroll control for the second video
             let isScrolling = false;
-            window.addEventListener('scroll', function() {
+            let rafId = null;
+            
+            function handleScroll() {
                 if (!isIntroPlaying && isScrollVideoReady) {
-                    isScrolling = true;
-                    
                     // Calculate scroll progress (0 to 1)
                     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-                    const docHeight = document.documentElement.scrollHeight - window.innerHeight;
-                    const scrollProgress = Math.min(Math.max(scrollTop / docHeight, 0), 1);
+                    const scrollProgress = Math.min(scrollTop / maxScrollHeight, 1);
                     
                     // Update video frame
                     updateScrollVideoFrame(scrollProgress);
-                    
-                    // Reset scrolling flag after a delay
-                    clearTimeout(window.scrollTimeout);
-                    window.scrollTimeout = setTimeout(function() {
-                        isScrolling = false;
-                    }, 100);
+                }
+            }
+            
+            // Throttled scroll handler using requestAnimationFrame
+            window.addEventListener('scroll', function() {
+                if (!isIntroPlaying && isScrollVideoReady) {
+                    if (!rafId) {
+                        rafId = requestAnimationFrame(function() {
+                            handleScroll();
+                            rafId = null;
+                        });
+                    }
                 }
             });
             
@@ -416,15 +413,16 @@
             // Handle video errors
             introVideo.addEventListener('error', function() {
                 console.error('Error loading intro video');
-                loadingScreen.querySelector('p').textContent = 'Error loading video. Please refresh the page.';
+                loadingScreen.querySelector('p').textContent = 'Error loading intro video. Please refresh the page.';
             });
             
             scrollVideo.addEventListener('error', function() {
                 console.error('Error loading scroll video');
-                // Continue with experience even if scroll video fails
-                isScrollVideoReady = true;
-                startExperience();
+                loadingScreen.querySelector('p').textContent = 'Error loading scroll video. Please refresh the page.';
             });
+            
+            // Debug info
+            console.log('Scroll video duration:', scrollVideoDuration);
         });
     </script>
 </body>
