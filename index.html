@@ -78,31 +78,6 @@
             max-width: 500px;
         }
 
-        header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
-        }
-
-        header p {
-            font-size: 1.2rem;
-            opacity: 0.9;
-        }
-
-        .content {
-            margin: 2rem 0;
-        }
-
-        .content h2 {
-            font-size: 1.8rem;
-            margin-bottom: 1rem;
-        }
-
-        .content p {
-            font-size: 1.1rem;
-            line-height: 1.6;
-            margin-bottom: 1rem;
-        }
-
         footer {
             display: flex;
             justify-content: space-between;
@@ -124,30 +99,6 @@
         .controls button:hover {
             background: rgba(255, 255, 255, 0.3);
             transform: translateY(-2px);
-        }
-
-        .scroll-indicator {
-            display: flex;
-            align-items: center;
-            font-size: 1rem;
-            opacity: 0.8;
-        }
-
-        .scroll-indicator .icon {
-            margin-left: 0.5rem;
-            animation: bounce 2s infinite;
-        }
-
-        @keyframes bounce {
-            0%, 20%, 50%, 80%, 100% {
-                transform: translateY(0);
-            }
-            40% {
-                transform: translateY(-10px);
-            }
-            60% {
-                transform: translateY(-5px);
-            }
         }
 
         .progress-container {
@@ -207,8 +158,15 @@
         #scroll-content {
             position: relative;
             z-index: 5;
-            height: 200vh; /* Fixed height - we'll adjust this programmatically */
             pointer-events: none;
+        }
+
+        .scroll-spacer {
+            height: 100vh; /* First viewport is for the initial state */
+        }
+
+        .video-scroll-area {
+            height: 1000px; /* This will be adjusted based on video duration */
         }
     </style>
 </head>
@@ -225,7 +183,7 @@
             <source src="./IntroVid.mp4" type="video/mp4">
             Your browser does not support the video tag.
         </video>
-        <video id="scroll-video" muted playsinline preload="metadata">
+        <video id="scroll-video" muted playsinline preload="auto">
             <source src="./ScrollVid.mp4" type="video/mp4">
             Your browser does not support the video tag.
         </video>
@@ -234,12 +192,6 @@
 
     <!-- UI Overlay -->
     <div id="ui-overlay">
-
-        <footer class="ui-section">
-            <div class="controls">
-                <button id="replay-btn">Replay Intro</button>
-            </div>
-        </footer>
     </div>
 
     <!-- Progress Bar -->
@@ -248,7 +200,10 @@
     </div>
 
     <!-- Scrollable content area -->
-    <div id="scroll-content"></div>
+    <div id="scroll-content">
+        <div class="scroll-spacer"></div>
+        <div class="video-scroll-area" id="video-scroll-area"></div>
+    </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -259,16 +214,19 @@
             const scrollCanvas = document.getElementById('scroll-canvas');
             const canvasContext = scrollCanvas.getContext('2d');
             const replayBtn = document.getElementById('replay-btn');
-            const muteBtn = document.getElementById('mute-btn');
             const progressBar = document.getElementById('progress-bar');
-            const scrollContent = document.getElementById('scroll-content');
+            const videoScrollArea = document.getElementById('video-scroll-area');
             
             // State variables
             let isIntroPlaying = true;
             let isScrollVideoReady = false;
             let scrollVideoDuration = 0;
-            let isMuted = true;
-            let maxScrollHeight = 0;
+            let videoScrollHeight = 0;
+            
+            // Debug function
+            function debug(message) {
+                console.log(message);
+            }
             
             // Set canvas size
             function setCanvasSize() {
@@ -279,45 +237,120 @@
             setCanvasSize();
             window.addEventListener('resize', setCanvasSize);
             
+            // Video error handling
+            function handleVideoError(videoElement, videoName) {
+                videoElement.addEventListener('error', function() {
+                    debug(`Error loading ${videoName}: ${videoElement.error ? videoElement.error.message : 'Unknown error'}`);
+                    debug(`Network state: ${videoElement.networkState}, Ready state: ${videoElement.readyState}`);
+                    
+                    if (videoName === 'scroll video') {
+                        // Try to load a fallback or use a different approach
+                        debug('Scroll video failed, trying to continue with available data');
+                        if (scrollVideoDuration === 0) {
+                            scrollVideoDuration = 5; // Default fallback duration
+                            videoScrollHeight = 1500; // Default scroll height
+                            videoScrollArea.style.height = videoScrollHeight + 'px';
+                            isScrollVideoReady = true;
+                            startExperience();
+                        }
+                    }
+                });
+            }
+            
+            // Set up error handling for both videos
+            handleVideoError(introVideo, 'intro video');
+            handleVideoError(scrollVideo, 'scroll video');
+            
             // Load videos
             introVideo.addEventListener('loadeddata', function() {
+                debug('Intro video loaded successfully');
                 console.log('Intro video loaded');
+                
+                // Also listen for canplay event for scroll video
+                scrollVideo.addEventListener('loadeddata', function() {
+                    debug('Scroll video loadeddata');
+                    console.log('Scroll video loaded');
+                });
+                
+                scrollVideo.addEventListener('canplay', function() {
+                    debug('Scroll video can play');
+                });
                 
                 // Load scroll video metadata to get duration
                 scrollVideo.addEventListener('loadedmetadata', function() {
+                    debug('Scroll video metadata loaded');
                     console.log('Scroll video metadata loaded');
                     scrollVideoDuration = scrollVideo.duration;
                     isScrollVideoReady = true;
                     
                     // Calculate scroll height based on video duration
-                    // We want the full video to play over the height of 1 viewport
-                    // So we make the scrollable area equal to the viewport height
-                    maxScrollHeight = window.innerHeight;
-                    scrollContent.style.height = (maxScrollHeight * 2) + 'px'; // 2x viewport height for comfortable scrolling
+                    // Use a comfortable scroll speed: 300px per second
+                    const scrollSpeed = 300; // pixels per second
+                    videoScrollHeight = Math.max(scrollVideoDuration * scrollSpeed, window.innerHeight);
+                    videoScrollArea.style.height = videoScrollHeight + 'px';
+                    
+                    debug(`Video duration: ${scrollVideoDuration}s, Scroll height: ${videoScrollHeight}px`);
+                    console.log('Video duration:', scrollVideoDuration, 'Scroll height:', videoScrollHeight);
+                    
+                    // Set up the seeked event handler
+                    scrollVideo.addEventListener('seeked', function() {
+                        canvasContext.drawImage(scrollVideo, 0, 0, scrollCanvas.width, scrollCanvas.height);
+                    });
                     
                     startExperience();
                 });
                 
+                // Force load the scroll video
+                debug('Attempting to load scroll video...');
+                scrollVideo.load(); // Force load the video
+                scrollVideo.currentTime = 0.1; // Small seek to trigger loading
+                
                 // Fallback in case scroll video takes too long
                 setTimeout(function() {
                     if (!isScrollVideoReady) {
-                        console.warn('Scroll video loading timeout, using default values');
-                        scrollVideoDuration = 10; // Default duration
-                        maxScrollHeight = window.innerHeight;
-                        scrollContent.style.height = (maxScrollHeight * 2) + 'px';
+                        debug('Scroll video loading timeout, checking current state');
+                        console.warn('Scroll video loading timeout, using available data');
+                        
+                        // Check if we have any duration info
+                        if (scrollVideo.duration && scrollVideo.duration !== Infinity) {
+                            scrollVideoDuration = scrollVideo.duration;
+                            debug(`Using available duration: ${scrollVideoDuration}`);
+                        } else {
+                            scrollVideoDuration = 5; // Fallback duration
+                            debug(`Using fallback duration: ${scrollVideoDuration}`);
+                        }
+                        
+                        videoScrollHeight = Math.max(scrollVideoDuration * 300, window.innerHeight);
+                        videoScrollArea.style.height = videoScrollHeight + 'px';
                         isScrollVideoReady = true;
+                        
+                        scrollVideo.addEventListener('seeked', function() {
+                            canvasContext.drawImage(scrollVideo, 0, 0, scrollCanvas.width, scrollCanvas.height);
+                        });
+                        
                         startExperience();
                     }
-                }, 5000);
+                }, 8000); // Increased timeout to 8 seconds
             });
             
             function startExperience() {
+                debug('Starting experience');
                 // Hide loading screen and play intro video
                 loadingScreen.classList.add('hidden');
-                introVideo.play();
+                introVideo.play().catch(e => {
+                    debug(`Intro video play failed: ${e.message}`);
+                    // Auto-play might be blocked, user interaction required
+                    loadingScreen.querySelector('p').textContent = 'Click to start experience';
+                    loadingScreen.style.cursor = 'pointer';
+                    loadingScreen.onclick = function() {
+                        introVideo.play();
+                        loadingScreen.classList.add('hidden');
+                    };
+                });
                 
                 // When intro video ends, switch to scroll-controlled video
                 introVideo.addEventListener('ended', function() {
+                    debug('Intro video ended, switching to scroll video');
                     isIntroPlaying = false;
                     introVideo.style.display = 'none';
                     scrollCanvas.style.display = 'block';
@@ -325,9 +358,25 @@
                     // Enable scrolling
                     document.body.style.overflow = 'auto';
                     
-                    // Draw first frame
-                    updateScrollVideoFrame(0);
+                    // Force draw the first frame
+                    drawFirstFrame();
                 });
+            }
+            
+            // Function to ensure first frame is drawn
+            function drawFirstFrame() {
+                debug('Drawing first frame');
+                scrollVideo.currentTime = 0;
+                setTimeout(() => {
+                    if (scrollVideo.readyState >= 2) {
+                        canvasContext.drawImage(scrollVideo, 0, 0, scrollCanvas.width, scrollCanvas.height);
+                        progressBar.style.width = '0%';
+                        debug('First frame drawn successfully');
+                    } else {
+                        debug(`Scroll video readyState: ${scrollVideo.readyState}, retrying...`);
+                        setTimeout(drawFirstFrame, 200);
+                    }
+                }, 100);
             }
             
             // Update scroll video frame based on scroll position
@@ -340,14 +389,9 @@
                 // Calculate video time based on scroll progress
                 const videoTime = clampedProgress * scrollVideoDuration;
                 
-                // Set video time and draw frame to canvas
-                if (videoTime <= scrollVideoDuration) {
+                // Only update if we're within the video duration and time has changed
+                if (videoTime <= scrollVideoDuration && Math.abs(scrollVideo.currentTime - videoTime) > 0.03) {
                     scrollVideo.currentTime = videoTime;
-                    
-                    // Use seeked event to ensure we have the correct frame
-                    scrollVideo.onseeked = function() {
-                        canvasContext.drawImage(scrollVideo, 0, 0, scrollCanvas.width, scrollCanvas.height);
-                    };
                 }
                 
                 // Update progress bar
@@ -355,14 +399,15 @@
             }
             
             // Scroll control for the second video
-            let isScrolling = false;
             let rafId = null;
             
             function handleScroll() {
                 if (!isIntroPlaying && isScrollVideoReady) {
                     // Calculate scroll progress (0 to 1)
                     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-                    const scrollProgress = Math.min(scrollTop / maxScrollHeight, 1);
+                    const scrollStart = window.innerHeight; // Start after first viewport
+                    const availableScroll = scrollTop - scrollStart;
+                    const scrollProgress = Math.min(Math.max(availableScroll / videoScrollHeight, 0), 1);
                     
                     // Update video frame
                     updateScrollVideoFrame(scrollProgress);
@@ -380,49 +425,6 @@
                     }
                 }
             });
-            
-            // Replay intro button
-            replayBtn.addEventListener('click', function() {
-                // Reset to intro state
-                isIntroPlaying = true;
-                introVideo.style.display = 'block';
-                scrollCanvas.style.display = 'none';
-                
-                // Reset scroll position
-                window.scrollTo(0, 0);
-                
-                // Disable scrolling during intro
-                document.body.style.overflow = 'hidden';
-                
-                // Play intro video again
-                introVideo.currentTime = 0;
-                introVideo.play();
-                
-                // Reset progress bar
-                progressBar.style.width = '0%';
-            });
-            
-            // Mute/unmute button
-            muteBtn.addEventListener('click', function() {
-                isMuted = !isMuted;
-                introVideo.muted = isMuted;
-                scrollVideo.muted = isMuted;
-                muteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
-            });
-            
-            // Handle video errors
-            introVideo.addEventListener('error', function() {
-                console.error('Error loading intro video');
-                loadingScreen.querySelector('p').textContent = 'Error loading intro video. Please refresh the page.';
-            });
-            
-            scrollVideo.addEventListener('error', function() {
-                console.error('Error loading scroll video');
-                loadingScreen.querySelector('p').textContent = 'Error loading scroll video. Please refresh the page.';
-            });
-            
-            // Debug info
-            console.log('Scroll video duration:', scrollVideoDuration);
         });
     </script>
 </body>
